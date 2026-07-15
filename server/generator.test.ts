@@ -37,4 +37,9 @@ describe('ensureRenderCall', () => {
     const code = 'const value = 42;';
     expect(ensureRenderCall(code)).toBe(code);
   });
+
+  it('컴포넌트보다 먼저 선언된 대문자 헬퍼 상수를 무시하고 실제 컴포넌트를 렌더한다', () => {
+    const code = 'const MAX_ITEMS = 5;\nconst Card = () => null;';
+    expect(ensureRenderCall(code)).toBe(`${code}\n\nrender(<Card />);`);
+  });
 });

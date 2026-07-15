@@ -11,14 +11,19 @@ export function stripCodeFences(text: string): string {
 
 /**
  * react-live(noInline)는 `render(...)` 호출이 있어야 미리보기를 그린다.
- * 응답에 render 호출이 없으면 첫 컴포넌트 선언을 찾아 자동으로 주입한다.
+ * 응답에 render 호출이 없으면 컴포넌트 선언을 찾아 자동으로 주입한다.
+ *
+ * 마지막으로 매칭되는 선언을 사용한다 — 헬퍼 상수(예: `const MAX_ITEMS = 5;`)도
+ * 대문자로 시작하면 정규식에 매칭되지만, 실제 컴포넌트는 관례상 그런 헬퍼들
+ * 다음에 마지막으로 선언되므로 이쪽이 첫 매치보다 정확도가 높다.
  */
 export function ensureRenderCall(code: string): string {
   if (/\brender\s*\(/.test(code)) return code;
 
-  const match = code.match(/(?:const|function)\s+([A-Z]\w+)/);
-  if (match) {
-    return `${code}\n\nrender(<${match[1]} />);`;
+  const matches = [...code.matchAll(/(?:const|function)\s+([A-Z]\w+)/g)];
+  const lastMatch = matches.at(-1);
+  if (lastMatch) {
+    return `${code}\n\nrender(<${lastMatch[1]} />);`;
   }
   return code;
 }
