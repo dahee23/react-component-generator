@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import type { GeneratedComponent, Provider } from '../types';
+import { parseSSEBuffer, parseStreamEvent } from '../lib/sse';
 
 const STORAGE_KEY = 'component-generator:history';
 const MAX_HISTORY = 20;
@@ -48,17 +49,27 @@ interface UseComponentGeneratorReturn {
 }
 
 export function useComponentGenerator(): UseComponentGeneratorReturn {
-  const [components, setComponents] = useState<GeneratedComponent[]>(loadStoredComponents);
+  // history: 완료되어 확정된 컴포넌트만 담는다 — 이 상태만 localStorage에 저장되고
+  // MAX_HISTORY 개수 제한을 받는다.
+  const [history, setHistory] = useState<GeneratedComponent[]>(loadStoredComponents);
+  // streamingComponent: 현재 스트리밍 중인 컴포넌트(있다면 단 하나). 완료 전까지는
+  // history/localStorage에 반영하지 않고, 화면에서만 실시간으로 code가 채워지는 걸 보여준다.
+  const [streamingComponent, setStreamingComponent] = useState<GeneratedComponent | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    persistComponents(components);
-  }, [components]);
+    persistComponents(history);
+  }, [history]);
 
   const generate = useCallback(async (prompt: string, apiKey: string | undefined, provider: Provider) => {
     setIsLoading(true);
     setError(null);
+
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const createdAt = new Date();
+
+    setStreamingComponent({ id, prompt, code: '', createdAt, isStreaming: true });
 
     try {
       const res = await fetch('/api/generate', {
@@ -67,35 +78,68 @@ export function useComponentGenerator(): UseComponentGeneratorReturn {
         body: JSON.stringify({ prompt, ...(apiKey && { apiKey }), provider }),
       });
 
-      const data = await res.json();
-
       if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
         throw new Error(data.error || 'Failed to generate component');
       }
 
-      const newComponent: GeneratedComponent = {
-        id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-        prompt,
-        code: data.code,
-        createdAt: new Date(),
-      };
+      if (!res.body) {
+        throw new Error('스트리밍 응답을 받지 못했습니다.');
+      }
 
-      setComponents((prev) => [newComponent, ...prev].slice(0, MAX_HISTORY));
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let finalCode: string | null = null;
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const { events, remainder } = parseSSEBuffer(buffer);
+        buffer = remainder;
+
+        for (const rawEvent of events) {
+          const event = parseStreamEvent(rawEvent.data);
+          if (!event) continue;
+
+          if (event.type === 'delta') {
+            setStreamingComponent((prev) =>
+              prev && prev.id === id ? { ...prev, code: prev.code + event.text } : prev,
+            );
+          } else if (event.type === 'done') {
+            finalCode = event.code;
+          } else if (event.type === 'error') {
+            throw new Error(event.message);
+          }
+        }
+      }
+
+      if (finalCode === null) {
+        throw new Error('스트리밍이 완료되지 않았습니다.');
+      }
+
+      const newComponent: GeneratedComponent = { id, prompt, code: finalCode, createdAt };
+      setHistory((prev) => [newComponent, ...prev].slice(0, MAX_HISTORY));
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
       setError(message);
     } finally {
+      setStreamingComponent(null);
       setIsLoading(false);
     }
   }, []);
 
   const removeComponent = useCallback((id: string) => {
-    setComponents((prev) => prev.filter((c) => c.id !== id));
+    setHistory((prev) => prev.filter((c) => c.id !== id));
   }, []);
 
   const clearAll = useCallback(() => {
-    setComponents([]);
+    setHistory([]);
   }, []);
+
+  const components = streamingComponent ? [streamingComponent, ...history] : history;
 
   return { components, isLoading, error, generate, removeComponent, clearAll };
 }

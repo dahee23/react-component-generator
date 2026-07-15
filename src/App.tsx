@@ -160,7 +160,7 @@ function App() {
           </div>
         )}
 
-        {isLoading && (
+        {isLoading && !components.some((component) => component.isStreaming) && (
           <div className="loading-card">
             <div className="loading-pulse" />
             <p>컴포넌트를 생성하고 있습니다...</p>
