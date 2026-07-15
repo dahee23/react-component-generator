@@ -15,7 +15,7 @@ function loadStoredComponents(): GeneratedComponent[] {
 
     return parsed
       .filter(
-        (item): item is GeneratedComponent & { createdAt: string } =>
+        (item): item is Omit<GeneratedComponent, 'createdAt'> & { createdAt: string } =>
           !!item &&
           typeof item.id === 'string' &&
           typeof item.prompt === 'string' &&
