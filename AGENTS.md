@@ -13,6 +13,7 @@
 
 - **Never hardcode API keys.** Anthropic/Google keys come from `.env` (`ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`) or a client-supplied key; see `server/AGENTS.md` for the resolution order.
 - **Never commit `.env`.** Only `.env.example` (empty placeholders) is tracked.
+- **Never read `.env` or credential-like files** (`.env.local`, `credentials.json`, `secrets.json`, `*.pem`, `*.key`, `id_rsa`, etc.), even to "just check" a value. This is enforced by `permissions.deny` in `.claude/settings.json` — the `Read` tool refuses these paths outright. `.env.example` is exempt (placeholders only, no real secrets) and stays readable. If you need to know whether a key is configured without seeing its value, use the app's own indirect check (`GET /api/config`, see `server/AGENTS.md`) instead of reading the file. Note the deny list covers the `Read` tool only, not arbitrary shell commands (`cat`, etc.) — don't route around it via `Bash`.
 - **Test files are co-located** with the code they cover (`foo.ts` + `foo.test.ts` in the same directory), not in a separate `__tests__/` tree. Follow this in both `server/` and `src/`.
 - **Commit convention:** Korean commit messages, `<type>: <summary>` where type is one of `feat/fix/refactor/chore/docs/test/style`. The `commit` skill (`.claude/skills/commit/`) automates this — prefer invoking it over writing raw `git commit` commands.
 - **Maintenance policy:** if you notice this file describing a command, path, or rule that no longer matches the code, fix the file in the same change rather than leaving the drift.
