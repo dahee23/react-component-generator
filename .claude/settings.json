@@ -19,5 +19,19 @@
       "Read(**/*.key)",
       "Read(**/id_rsa)"
     ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/scripts/tdd-reminder.cjs 2>/dev/null || true",
+            "statusMessage": "TDD 규칙 확인 중..."
+          }
+        ]
+      }
+    ]
   }
 }
