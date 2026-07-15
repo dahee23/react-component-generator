@@ -617,6 +617,10 @@
   min-height: 280px;
 }
 
+.tab-panel--hidden {
+  display: none;
+}
+
 .preview-panel,
 .code-panel {
   height: 100%;

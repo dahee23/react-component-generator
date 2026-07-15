@@ -66,11 +66,12 @@ export function ComponentCard({ component, onRemove, onRegenerate, isLoading }: 
         </button>
       </div>
       <div className="card-content">
-        {activeTab === 'preview' ? (
+        <div className={activeTab === 'preview' ? undefined : 'tab-panel--hidden'}>
           <LivePreview key={previewKey} code={component.code} />
-        ) : (
+        </div>
+        <div className={activeTab === 'code' ? undefined : 'tab-panel--hidden'}>
           <CodeView code={component.code} />
-        )}
+        </div>
       </div>
     </div>
   );
