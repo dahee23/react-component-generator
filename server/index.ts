@@ -1,5 +1,6 @@
-import { stripCodeFences, ensureRenderCall } from './generator';
 import { withModelFallback } from './fallback';
+import { extractAnthropicDeltaText, extractGoogleDeltaText } from './sse';
+import { buildEventStream, mapErrorMessage, statusForError } from './stream';
 
 // 우선순위 순서. 앞 모델이 실패하면 다음 모델로 폴백한다.
 const GOOGLE_MODELS = ['gemini-3.1-flash-lite', 'gemini-3.5-flash'];
@@ -89,7 +90,15 @@ function resolveApiKey(provider: Provider, clientKey?: string): string | null {
   return clientKey || ENV_KEYS[provider] || null;
 }
 
-async function callAnthropic(prompt: string, apiKey: string): Promise<string> {
+/**
+ * 업스트림(Anthropic/Google) 스트리밍 응답의 body reader를 여는 함수들.
+ * 첫 바이트를 클라이언트로 흘려보내기 전 단계이므로, 여기서 던진 에러는
+ * (Google의 경우) 모델 폴백으로 이어지거나 /api/generate 핸들러에서 평범한
+ * JSON 에러 응답으로 변환된다. 스트림을 열고 난 뒤(reader 획득 후) 발생하는
+ * 에러는 이미 클라이언트에 응답이 시작된 상태라 폴백이 불가능하다 —
+ * buildEventStream이 SSE "error" 이벤트로 처리한다.
+ */
+async function openAnthropicStream(prompt: string, apiKey: string): Promise<ReadableStreamDefaultReader<Uint8Array>> {
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -102,25 +111,26 @@ async function callAnthropic(prompt: string, apiKey: string): Promise<string> {
       max_tokens: 4096,
       system: SYSTEM_PROMPT,
       messages: [{ role: 'user', content: prompt }],
+      stream: true,
     }),
   });
 
   if (!response.ok) {
     throw new Error(`Claude API error: ${response.status}`);
   }
+  if (!response.body) {
+    throw new Error('Claude API가 스트리밍 응답 바디를 반환하지 않았습니다.');
+  }
 
-  const data = (await response.json()) as {
-    content: Array<{ type: string; text?: string }>;
-  };
-
-  return data.content
-    .filter((block) => block.type === 'text')
-    .map((block) => block.text)
-    .join('');
+  return response.body.getReader();
 }
 
-async function callGoogleModel(prompt: string, apiKey: string, model: string): Promise<string> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+async function openGoogleModelStream(
+  prompt: string,
+  apiKey: string,
+  model: string,
+): Promise<ReadableStreamDefaultReader<Uint8Array>> {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${apiKey}`;
 
   const response = await fetch(url, {
     method: 'POST',
@@ -135,28 +145,19 @@ async function callGoogleModel(prompt: string, apiKey: string, model: string): P
   if (!response.ok) {
     throw new Error(`Gemini API error: ${response.status}`);
   }
-
-  const data = (await response.json()) as {
-    candidates: Array<{
-      content: { parts: Array<{ text?: string }> };
-      finishReason?: string;
-    }>;
-  };
-
-  const candidate = data.candidates?.[0];
-  if (candidate?.finishReason === 'MAX_TOKENS') {
-    throw new Error('생성된 코드가 너무 길어 잘렸습니다. 더 간단한 컴포넌트를 요청해주세요.');
+  if (!response.body) {
+    throw new Error('Gemini API가 스트리밍 응답 바디를 반환하지 않았습니다.');
   }
 
-  return (
-    candidate?.content?.parts
-      ?.map((part) => part.text)
-      ?.join('') ?? ''
-  );
+  return response.body.getReader();
 }
 
-async function callGoogle(prompt: string, apiKey: string): Promise<string> {
-  return withModelFallback(GOOGLE_MODELS, (model) => callGoogleModel(prompt, apiKey, model));
+async function openGoogleStream(prompt: string, apiKey: string): Promise<ReadableStreamDefaultReader<Uint8Array>> {
+  // 폴백은 아직 어떤 바이트도 클라이언트로 보내지 않은 상태(reader를 얻기 전)에서만
+  // 동작한다. withModelFallback은 각 모델에 대해 openGoogleModelStream을 호출하는데,
+  // 이 함수가 던지는 에러는 response.ok가 false이거나 body가 없을 때만 발생하므로
+  // "스트리밍 시작 전 실패"라는 전제를 만족한다.
+  return withModelFallback(GOOGLE_MODELS, (model) => openGoogleModelStream(prompt, apiKey, model));
 }
 
 const server = Bun.serve({
@@ -204,34 +205,33 @@ const server = Bun.serve({
           );
         }
 
-        const text =
+        // 업스트림 reader를 여는 단계까지는 아직 클라이언트에 한 바이트도 나가지
+        // 않은 상태다 — 여기서 던지는 에러는 (Google이면 모델 폴백을 거친 뒤) 아래
+        // catch에서 평범한 JSON 에러 응답으로 변환된다. reader를 연 다음부터는
+        // buildEventStream이 스트림 내부에서 에러를 처리한다(폴백 불가, SSE error 이벤트로 통지).
+        const upstreamReader =
           provider === 'google'
-            ? await callGoogle(prompt, resolvedKey)
-            : await callAnthropic(prompt, resolvedKey);
+            ? await openGoogleStream(prompt, resolvedKey)
+            : await openAnthropicStream(prompt, resolvedKey);
 
-        const code = ensureRenderCall(stripCodeFences(text));
+        const extractDeltaText = provider === 'google' ? extractGoogleDeltaText : extractAnthropicDeltaText;
 
-        return Response.json({ code }, { headers: CORS_HEADERS });
+        const eventStream = buildEventStream(upstreamReader, extractDeltaText);
+
+        return new Response(eventStream, {
+          headers: {
+            ...CORS_HEADERS,
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            Connection: 'keep-alive',
+          },
+        });
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown error';
 
-        if (message.includes('503')) {
-          return Response.json(
-            { error: 'API 서버가 일시적으로 과부하 상태입니다. 잠시 후 다시 시도해주세요.' },
-            { status: 503, headers: CORS_HEADERS }
-          );
-        }
-
-        if (message.includes('429')) {
-          return Response.json(
-            { error: '요청이 너무 많습니다. 잠시 후 다시 시도해주세요.' },
-            { status: 429, headers: CORS_HEADERS }
-          );
-        }
-
         return Response.json(
-          { error: message },
-          { status: 500, headers: CORS_HEADERS }
+          { error: mapErrorMessage(message) },
+          { status: statusForError(message), headers: CORS_HEADERS }
         );
       }
     }

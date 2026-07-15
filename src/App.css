@@ -627,8 +627,57 @@
   box-shadow: 0 2px 8px rgba(124, 58, 237, 0.12);
 }
 
+.tab:disabled,
+.btn-refresh:disabled,
+.btn-remove:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .card-content {
   min-height: 280px;
+}
+
+.streaming-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: var(--primary-soft);
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  color: var(--primary);
+  font-size: 0.76rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.streaming-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.code-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 1px;
+  background: var(--accent);
+  vertical-align: text-bottom;
+  animation: blink 1s step-end infinite;
+}
+
+@keyframes blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
 }
 
 .tab-panel--hidden {

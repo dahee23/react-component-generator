@@ -2,9 +2,10 @@ import { useState } from 'react';
 
 interface CodeViewProps {
   code: string;
+  isStreaming?: boolean;
 }
 
-export function CodeView({ code }: CodeViewProps) {
+export function CodeView({ code, isStreaming = false }: CodeViewProps) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
@@ -17,12 +18,22 @@ export function CodeView({ code }: CodeViewProps) {
     <div className="code-panel">
       <div className="panel-header">
         <h3>코드</h3>
-        <button className="btn-copy" onClick={handleCopy}>
-          {copied ? '복사됨!' : '복사'}
-        </button>
+        {isStreaming ? (
+          <span className="streaming-badge">
+            <span className="streaming-dot" aria-hidden="true" />
+            실시간 생성 중
+          </span>
+        ) : (
+          <button className="btn-copy" onClick={handleCopy}>
+            {copied ? '복사됨!' : '복사'}
+          </button>
+        )}
       </div>
       <pre className="code-block">
-        <code>{code}</code>
+        <code>
+          {code}
+          {isStreaming && <span className="code-cursor" aria-hidden="true" />}
+        </code>
       </pre>
     </div>
   );
