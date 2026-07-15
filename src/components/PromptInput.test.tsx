@@ -26,4 +26,14 @@ describe('PromptInput', () => {
     render(<PromptInput onGenerate={vi.fn()} isLoading={true} />);
     expect(screen.getByRole('button', { name: '생성 중...' })).toBeDisabled();
   });
+
+  it('입력한 글자 수를 실시간으로 보여준다', async () => {
+    const user = userEvent.setup();
+    render(<PromptInput onGenerate={vi.fn()} isLoading={false} />);
+
+    expect(screen.getByText('0자')).toBeInTheDocument();
+
+    await user.type(screen.getByRole('textbox'), '프로필 카드');
+    expect(screen.getByText('6자')).toBeInTheDocument();
+  });
 });

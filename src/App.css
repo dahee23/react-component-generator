@@ -305,6 +305,20 @@
   color: var(--text-soft);
 }
 
+.prompt-textarea-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.prompt-char-count {
+  align-self: flex-end;
+  color: var(--text-soft);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+
 .btn-generate {
   height: 52px;
   padding: 0 24px;
